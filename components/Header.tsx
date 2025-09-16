@@ -8,7 +8,7 @@ const Header: React.FC = () => {
           AI 퍼스널 컬러 스타일리스트
         </h1>
         <p className="text-md text-gray-500 mt-1">
-          사진 한 장으로 퍼스널 컬러를 분석하고, 어울리는 색상을 가상으로 입어보세요.
+          퍼스널 컬러를 분석하고, 원하는 옷을 골라 가상으로 입어보세요.
         </p>
       </div>
     </header>

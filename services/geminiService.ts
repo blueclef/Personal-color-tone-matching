@@ -1,5 +1,5 @@
-
 import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
+import { Color } from "../types";
 
 if (!process.env.API_KEY) {
   throw new Error("API_KEY environment variable not set");
@@ -8,11 +8,11 @@ if (!process.env.API_KEY) {
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 /**
- * Analyzes the skin tone from an image and suggests a color palette.
+ * Analyzes the skin tone from an image and suggests a color palette with names.
  * @param imageBase64 The base64 encoded image string of the portrait.
- * @returns A promise that resolves to an array of hex color strings.
+ * @returns A promise that resolves to an array of color objects with hex codes and names.
  */
-export async function analyzeSkinToneAndSuggestColors(imageBase64: string): Promise<string[]> {
+export async function analyzeSkinToneAndSuggestColors(imageBase64: string): Promise<Color[]> {
   try {
     const response: GenerateContentResponse = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
@@ -25,7 +25,7 @@ export async function analyzeSkinToneAndSuggestColors(imageBase64: string): Prom
             },
           },
           {
-            text: `From the provided portrait image, identify the user's skin undertone (e.g., cool, warm, neutral, olive). Based on this undertone, recommend a palette of 6 complementary clothing colors. Please provide the output in a strict JSON format. The JSON object should have a single key "colors", which is an array of 6 hex color code strings. Do not include any other text, explanations, or markdown formatting.`,
+            text: `From the provided portrait image, identify the user's skin undertone (e.g., cool, warm, neutral, olive). Based on this undertone, recommend a palette of 6 complementary clothing colors. Please provide the output in a strict JSON format. The JSON object should have a single key "colors", which is an array of 6 objects, each with a "hex" (string hex color code) and "name" (string color name) property. Do not include any other text, explanations, or markdown formatting.`,
           },
         ],
       },
@@ -37,7 +37,11 @@ export async function analyzeSkinToneAndSuggestColors(imageBase64: string): Prom
             colors: {
               type: Type.ARRAY,
               items: {
-                type: Type.STRING,
+                type: Type.OBJECT,
+                properties: {
+                  hex: { type: Type.STRING },
+                  name: { type: Type.STRING },
+                }
               },
             },
           },
@@ -55,13 +59,21 @@ export async function analyzeSkinToneAndSuggestColors(imageBase64: string): Prom
 }
 
 /**
- * Changes the color of the main clothing item in an image.
- * @param imageBase64 The base64 encoded image string of the clothing.
- * @param mimeType The MIME type of the clothing image.
+ * Performs a virtual try-on by fitting a recolored clothing item onto a person.
+ * @param personImageBase64 The base64 encoded image string of the person.
+ * @param personMimeType The MIME type of the person image.
+ * @param clothingImageBase64 The base64 encoded image string of the clothing.
+ * @param clothingMimeType The MIME type of the clothing image.
  * @param colorHex The target hex color for the clothing.
- * @returns A promise that resolves to the base64 string of the edited image.
+ * @returns A promise that resolves to the base64 string of the final edited image.
  */
-export async function recolorClothingImage(imageBase64: string, mimeType: string, colorHex: string): Promise<string> {
+export async function performVirtualTryOn(
+  personImageBase64: string,
+  personMimeType: string,
+  clothingImageBase64: string,
+  clothingMimeType: string,
+  colorHex: string
+): Promise<string> {
   try {
     const response: GenerateContentResponse = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image-preview',
@@ -69,12 +81,18 @@ export async function recolorClothingImage(imageBase64: string, mimeType: string
         parts: [
           {
             inlineData: {
-              data: imageBase64,
-              mimeType: mimeType,
+              data: personImageBase64,
+              mimeType: personMimeType,
             },
           },
           {
-            text: `Please change the color of the primary clothing item in this image to ${colorHex}. It is crucial to preserve the original textures, folds, shadows, and highlights to make the color change look natural and realistic. Do not alter the background or any other objects in the image.`,
+            inlineData: {
+              data: clothingImageBase64,
+              mimeType: clothingMimeType,
+            },
+          },
+          {
+            text: `This is a virtual try-on task. The first image is a person. The second image is a clothing item. Please change the color of the clothing item from the second image to ${colorHex} and realistically fit it onto the person in the first image. It is crucial to preserve the person's pose, face, and the background from the first image. Do not alter the background. The final output should be a single, photorealistic image of the person wearing the new, recolored clothing.`,
           },
         ],
       },
@@ -89,9 +107,9 @@ export async function recolorClothingImage(imageBase64: string, mimeType: string
       }
     }
 
-    throw new Error("No image was returned from the API.");
+    throw new Error("No image was returned from the API for the virtual try-on.");
   } catch (error) {
-    console.error("Error recoloring clothing image:", error);
-    throw new Error("Failed to recolor the clothing. Please try a different image or color.");
+    console.error("Error performing virtual try-on:", error);
+    throw new Error("Failed to perform virtual try-on. Please try a different image or color.");
   }
 }
