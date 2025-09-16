@@ -4,7 +4,8 @@ import ImageUploader from './components/ImageUploader';
 import ColorPalette from './components/ColorPalette';
 import Loader from './components/Loader';
 import Icon from './components/Icon';
-import { analyzeSkinToneAndSuggestColors, performVirtualTryOn } from './services/geminiService';
+import ImageEditor from './components/ImageEditor';
+import { analyzeSkinToneAndSuggestColors, performVirtualTryOn, changeHairStyle } from './services/geminiService';
 import { Color } from './types';
 
 interface ImageState {
@@ -20,19 +21,57 @@ function App() {
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isChangingHair, setIsChangingHair] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [editingImage, setEditingImage] = useState<ImageState | null>(null);
 
   const handlePersonImageUpload = useCallback((base64: string, file: File) => {
-    if (base64 && file.name) {
-      setPersonImage({ base64, file });
-    } else {
-      setPersonImage(null);
-    }
+    // Reset downstream state whenever a new image is uploaded or cleared
     setPalette(null);
     setSelectedColor(null);
     setResultImage(null);
     setError(null);
+    setPersonImage(null); // Also clear personImage to avoid flicker of old image
+
+    if (base64 && file.name) {
+      setEditingImage({ base64, file });
+      setIsEditorOpen(true);
+    } else {
+      // This case handles clearing the image via the uploader's 'x' button
+      setEditingImage(null);
+    }
   }, []);
+
+  const handleEditorSave = (editedDataUrl: string) => {
+    if (editingImage) {
+      const newBase64 = editedDataUrl.split(',')[1];
+      const mimeType = editedDataUrl.match(/:(.*?);/)?.[1] || 'image/jpeg';
+      
+      // Convert base64 to blob to create a file, so URL.createObjectURL works
+      const byteString = atob(newBase64);
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) {
+        ia[i] = byteString.charCodeAt(i);
+      }
+      const newBlob = new Blob([ia], { type: mimeType });
+      const newFile = new File([newBlob], editingImage.file.name, { type: mimeType });
+      
+      setPersonImage({ base64: newBase64, file: newFile });
+    }
+    setIsEditorOpen(false);
+    setEditingImage(null);
+  };
+
+  const handleEditorClose = () => {
+    // On cancel, use the original, unedited image
+    if (editingImage) {
+      setPersonImage(editingImage);
+    }
+    setIsEditorOpen(false);
+    setEditingImage(null);
+  };
 
   const handleClothingImageUpload = useCallback((base64: string, file: File) => {
     if (base64 && file.name) {
@@ -85,11 +124,41 @@ function App() {
     }
   };
   
+  const handleHairStyleChange = async (stylePrompt: string) => {
+    if (!resultImage) return;
+
+    setError(null);
+    setIsChangingHair(true);
+    
+    const currentImageBase64 = resultImage.split(',')[1];
+    const currentImageMimeType = resultImage.split(';')[0].split(':')[1] || 'image/png';
+
+    try {
+        const newImageBase64 = await changeHairStyle(
+            currentImageBase64,
+            currentImageMimeType,
+            stylePrompt
+        );
+        setResultImage(`data:image/png;base64,${newImageBase64}`);
+    } catch (err) {
+        setError(err instanceof Error ? err.message : 'An unknown error occurred.');
+    } finally {
+        setIsChangingHair(false);
+    }
+  };
+
   const initialResultImage = personImage ? URL.createObjectURL(personImage.file) : null;
   const currentImage = resultImage || initialResultImage;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center">
+      {isEditorOpen && editingImage && (
+        <ImageEditor
+          imageSrc={`data:${editingImage.file.type};base64,${editingImage.base64}`}
+          onSave={handleEditorSave}
+          onClose={handleEditorClose}
+        />
+      )}
       <Header />
       <main className="container mx-auto p-4 md:p-8 flex-grow w-full">
         {error && (
@@ -151,7 +220,7 @@ function App() {
 
           {/* Result Column */}
           <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm min-h-[300px] flex flex-col items-center justify-center relative">
-            {(isGenerating) && <Loader text="AI가 의상을 가상으로 입히고 있습니다..." />}
+            {(isGenerating || isChangingHair) && <Loader text={isChangingHair ? "AI가 헤어스타일을 바꾸고 있습니다..." : "AI가 의상을 가상으로 입히고 있습니다..."} />}
              <div className="w-full flex justify-between items-center mb-4">
                <h3 className="text-xl font-semibold text-gray-800">AI 가상 피팅 스튜디오</h3>
                 {resultImage && (
@@ -165,6 +234,29 @@ function App() {
                   </a>
                 )}
              </div>
+
+            {resultImage && (
+              <div className="w-full my-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <h4 className="text-md font-semibold text-gray-700 mb-3">3단계: 헤어스타일 변경</h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[
+                    { name: '단발', prompt: 'a short bob hairstyle' },
+                    { name: '긴머리', prompt: 'long wavy hair' },
+                    { name: '숏컷', prompt: 'a short pixie cut' },
+                    { name: '포니테일', prompt: 'a ponytail hairstyle' },
+                  ].map(({ name, prompt }) => (
+                    <button
+                      key={name}
+                      onClick={() => handleHairStyleChange(prompt)}
+                      disabled={isChangingHair}
+                      className="w-full text-sm bg-white border border-gray-300 text-gray-700 font-semibold py-2 px-3 rounded-md hover:bg-gray-100 disabled:bg-gray-200 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             
             {currentImage ? (
                 <img src={currentImage} alt="Virtual try-on result" className="w-full max-w-lg object-contain rounded-md" />

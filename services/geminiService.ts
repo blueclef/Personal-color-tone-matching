@@ -113,3 +113,49 @@ export async function performVirtualTryOn(
     throw new Error("Failed to perform virtual try-on. Please try a different image or color.");
   }
 }
+
+/**
+ * Changes the hairstyle of a person in an image.
+ * @param imageBase64 The base64 encoded image string of the person.
+ * @param imageMimeType The MIME type of the person image.
+ * @param hairStylePrompt A text description of the desired hairstyle.
+ * @returns A promise that resolves to the base64 string of the final edited image.
+ */
+export async function changeHairStyle(
+  imageBase64: string,
+  imageMimeType: string,
+  hairStylePrompt: string
+): Promise<string> {
+  try {
+    const response: GenerateContentResponse = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image-preview',
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              data: imageBase64,
+              mimeType: imageMimeType,
+            },
+          },
+          {
+            text: `Please change the hairstyle of the person in the image to a ${hairStylePrompt}. It is crucial to preserve the person's face, their clothing, and the background exactly as they are. The final output should be a single, photorealistic image of the person with the new hairstyle.`,
+          },
+        ],
+      },
+      config: {
+        responseModalities: [Modality.IMAGE, Modality.TEXT],
+      },
+    });
+
+    for (const part of response.candidates[0].content.parts) {
+      if (part.inlineData) {
+        return part.inlineData.data;
+      }
+    }
+
+    throw new Error("No image was returned from the API for changing the hairstyle.");
+  } catch (error) {
+    console.error("Error changing hairstyle:", error);
+    throw new Error("Failed to change hairstyle. Please try again.");
+  }
+}
